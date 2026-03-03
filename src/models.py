@@ -74,6 +74,12 @@ class BaseClientModel:
         os.makedirs(dest_path, exist_ok=True)
         full_path = os.path.join(dest_path, file_name)
 
+        if os.path.exists(full_path):
+            if expected_hash:
+                return self._hash_verify(full_path, expected_hash, hash_algo)
+            else:
+                return True
+
         try:
             with requests.get(url=url, stream=True, headers=self._headers) as request:
                 request.raise_for_status()

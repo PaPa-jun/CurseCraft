@@ -35,6 +35,30 @@ class FabricLoader(BaseClientModel):
             return data.get("sha512"), "sha512"
         else:
             return None
+        
+    def _get_minecraft_dir_path() -> str:
+        home_path = Path.home()
+        if os.name == "nt":
+            appdata = os.getenv("APPDATA")
+            minecraft_dir_path = (
+                os.path.join(appdata, ".minecraft")
+                if appdata
+                else os.path.join(str(home_path), ".minecraft")
+            )
+        elif os.name == "posix":
+            if os.path.exists(
+                os.path.join(
+                    str(home_path), "Library", "Application Support", "minecraft"
+                )
+            ):
+                minecraft_dir_path = os.path.join(
+                    str(home_path), "Library", "Application Support", "minecraft"
+                )
+            else:
+                minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
+        else:
+            minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
+        return minecraft_dir_path
 
     def download_dependencies(
         self,
@@ -80,27 +104,7 @@ class FabricLoader(BaseClientModel):
         if version_name is None:
             version_name = f"fabric-{minecraft_version}-{loader_version}"
         if minecraft_dir_path is None:
-            home_path = Path.home()
-            if os.name == "nt":
-                appdata = os.getenv("APPDATA")
-                minecraft_dir_path = (
-                    os.path.join(appdata, ".minecraft")
-                    if appdata
-                    else os.path.join(str(home_path), ".minecraft")
-                )
-            elif os.name == "posix":
-                if os.path.exists(
-                    os.path.join(
-                        str(home_path), "Library", "Application Support", "minecraft"
-                    )
-                ):
-                    minecraft_dir_path = os.path.join(
-                        str(home_path), "Library", "Application Support", "minecraft"
-                    )
-                else:
-                    minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
-            else:
-                minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
+            minecraft_dir_path = self._get_minecraft_dir_path()
         libraries_path = os.path.join(minecraft_dir_path, "libraries")
         versions_path = os.path.join(minecraft_dir_path, "versions")
         profile_path = os.path.join(versions_path, version_name)
