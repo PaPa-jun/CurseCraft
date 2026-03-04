@@ -2,10 +2,19 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
-from .models import ModLoaderInstaller
+from .models import Installer
 
 
-class FabricInstaller(ModLoaderInstaller):
+class ForgeInstaller(Installer):
+    def __init__(
+        self,
+        api_base_url: str = "https://meta.fabricmc.net",
+        max_workers: int = 5,
+    ) -> None:
+        super(FabricInstaller, self).__init__(api_base_url, max_workers)
+
+
+class FabricInstaller(Installer):
     def __init__(
         self,
         api_base_url: str = "https://meta.fabricmc.net",
@@ -69,7 +78,7 @@ class FabricInstaller(ModLoaderInstaller):
         return self._write_version_file(version_profile)
 
 
-class NeoForgeInstaller(ModLoaderInstaller):
+class NeoForgeInstaller(Installer):
     def __init__(
         self, maven_base_url: str = "https://maven.neoforged.net", max_workers=5
     ) -> None:
@@ -90,7 +99,7 @@ class NeoForgeInstaller(ModLoaderInstaller):
             loader_version,
             minecraft_dir_path,
         )
-        self.check_and_download_minecraft_jar()
+        self.check_and_download_minecraft_jar(download_block_size)
         self._get_installer(
             f"{self._base_url}/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
         )

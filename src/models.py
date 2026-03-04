@@ -77,9 +77,9 @@ class BaseClientModel:
     ) -> bool:
         if dest_path is None:
             home_path = Path.home()
-            dest_path = os.path.join(home_path, "Downloads")
+            dest_path = Path(home_path, "Downloads")
         os.makedirs(dest_path, exist_ok=True)
-        full_path = os.path.join(dest_path, file_name)
+        full_path = Path(dest_path, file_name)
 
         if os.path.exists(full_path):
             if expected_hash:
@@ -142,7 +142,7 @@ class BaseClientModel:
         return [results[item[0]] for item in files if item[0] in results]
 
 
-class ModLoaderInstaller(BaseClientModel):
+class Installer(BaseClientModel):
     def __init__(
         self,
         api_base_url: str,
@@ -151,7 +151,7 @@ class ModLoaderInstaller(BaseClientModel):
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15"
         }
-        super(ModLoaderInstaller, self).__init__(
+        super(Installer, self).__init__(
             self._headers, api_base_url, max_workers
         )
 
@@ -168,23 +168,23 @@ class ModLoaderInstaller(BaseClientModel):
         if os.name == "nt":
             appdata = os.getenv("APPDATA")
             minecraft_dir_path = (
-                os.path.join(appdata, ".minecraft")
+                Path(appdata, ".minecraft")
                 if appdata
-                else os.path.join(str(home_path), ".minecraft")
+                else Path(str(home_path), ".minecraft")
             )
         elif os.name == "posix":
             if os.path.exists(
-                os.path.join(
+                Path(
                     str(home_path), "Library", "Application Support", "minecraft"
                 )
             ):
-                minecraft_dir_path = os.path.join(
+                minecraft_dir_path = Path(
                     str(home_path), "Library", "Application Support", "minecraft"
                 )
             else:
-                minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
+                minecraft_dir_path = Path(str(home_path), ".minecraft")
         else:
-            minecraft_dir_path = os.path.join(str(home_path), ".minecraft")
+            minecraft_dir_path = Path(str(home_path), ".minecraft")
         return minecraft_dir_path
 
     def _get_installer(self, url: str) -> None:
@@ -405,7 +405,7 @@ class ModLoaderInstaller(BaseClientModel):
             return False
         return True
 
-    def check_and_download_minecraft_jar(self) -> bool:
+    def check_and_download_minecraft_jar(self, block_size: int = 8192) -> bool:
         if os.path.exists(self._static_data["MINECRAFT_JAR"]) is False:
             target_version = None
             for version_info in self._minecraft_manifest["versions"]:
@@ -421,7 +421,7 @@ class ModLoaderInstaller(BaseClientModel):
                     "versions",
                     self._static_data["MINECRAFT_VERSION"],
                 ),
-                8192,
+                block_size,
                 version_data["downloads"]["client"]["sha1"],
                 "sha1",
             )
