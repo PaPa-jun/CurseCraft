@@ -305,11 +305,9 @@ class Installer(BaseClientModel):
             main_class = processor.get("main_class")
             class_paths = processor.get("class_paths")
 
-            jar_path = processor["jar"]
             args = processor["args"]
 
             temp_files = []
-
             for i, arg in enumerate(args):
                 if arg.startswith("/data/"):
                     file_key = arg[1:]
@@ -326,7 +324,6 @@ class Installer(BaseClientModel):
 
             classpath_str = os.pathsep.join(class_paths)
             command = [java_executable, "-cp", classpath_str, main_class] + args
-
             try:
                 result = subprocess.run(
                     command,
