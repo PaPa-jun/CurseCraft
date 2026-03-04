@@ -4,6 +4,7 @@
 [![Minecraft](https://img.shields.io/badge/minecraft-1.13+-green.svg)](https://www.minecraft.net)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Read in Chinese](https://img.shields.io/badge/README-English-red?style=flat-square&logo=github)](README.md)
 
 > **一句话概括**：使用 CurseCraft，无需第三方启动器，即可在 Minecraft **官方启动器**中轻松游玩模组、光影及大型整合包。
 

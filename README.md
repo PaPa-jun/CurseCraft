@@ -4,6 +4,7 @@
 [![Minecraft](https://img.shields.io/badge/minecraft-1.13+-green.svg)](https://www.minecraft.net)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Read in Chinese](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-red?style=flat-square&logo=github)](README_ZH.md)
 
 > **In a nutshell**: With CurseCraft, you can easily play mods, shaders, and large modpacks in the **Minecraft Official Launcher** without needing any third-party launchers.
 
