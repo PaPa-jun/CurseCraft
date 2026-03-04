@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Any, Dict, List, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .utils import get_main_class
+from .utils import get_main_class, resolve_maven_coord
 
 
 class BaseClientModel:
@@ -151,9 +151,7 @@ class Installer(BaseClientModel):
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15"
         }
-        super(Installer, self).__init__(
-            self._headers, api_base_url, max_workers
-        )
+        super(Installer, self).__init__(self._headers, api_base_url, max_workers)
 
         self.installer = {}
         self._static_data = {}
@@ -174,9 +172,7 @@ class Installer(BaseClientModel):
             )
         elif os.name == "posix":
             if os.path.exists(
-                Path(
-                    str(home_path), "Library", "Application Support", "minecraft"
-                )
+                Path(str(home_path), "Library", "Application Support", "minecraft")
             ):
                 minecraft_dir_path = Path(
                     str(home_path), "Library", "Application Support", "minecraft"
@@ -198,35 +194,6 @@ class Installer(BaseClientModel):
         except Exception as e:
             raise RuntimeError(f"解析 installer 失败: {e}")
 
-    def _resolve_maven_coord(self, coord: str) -> str:
-        extension = "jar"
-
-        if "@" in coord:
-            coord_body, extension = coord.rsplit("@", 1)
-            parts = coord_body.split(":")
-        else:
-            parts = coord.split(":")
-
-        if len(parts) < 3:
-            raise ValueError(f"Invalid maven coord: {coord}")
-
-        group = parts[0]
-        artifact = parts[1]
-        version = parts[2]
-        classifier = parts[3] if len(parts) > 3 else None
-
-        if classifier and "@" in classifier:
-            classifier, ext_override = classifier.split("@", 1)
-            if ext_override:
-                extension = ext_override
-        group_path = group.replace(".", "/")
-        filename = f"{artifact}-{version}"
-
-        if classifier:
-            filename += f"-{classifier}"
-        filename += f".{extension}"
-        return f"{group_path}/{artifact}/{version}/{filename}"
-
     def _replace_arg_variable(self, arg: str) -> str:
         def replace_match(match):
             var_match = match.group(1)
@@ -242,7 +209,7 @@ class Installer(BaseClientModel):
             elif maven_match:
                 coord = maven_match[1:-1]
                 try:
-                    resolved_path = self._resolve_maven_coord(coord)
+                    resolved_path = resolve_maven_coord(coord)
                     resolved_path = str(
                         Path(self._static_data["ROOT"], "libraries", resolved_path)
                     )
@@ -267,7 +234,7 @@ class Installer(BaseClientModel):
                 Path(
                     self._static_data["ROOT"],
                     "libraries",
-                    self._resolve_maven_coord(processor["jar"]),
+                    resolve_maven_coord(processor["jar"]),
                 )
             )
             main_class = get_main_class(jar_path)
@@ -277,7 +244,7 @@ class Installer(BaseClientModel):
                     Path(
                         self._static_data["ROOT"],
                         "libraries",
-                        self._resolve_maven_coord(class_coord),
+                        resolve_maven_coord(class_coord),
                     )
                 )
                 class_paths.append(class_path)

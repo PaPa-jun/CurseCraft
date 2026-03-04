@@ -26,3 +26,32 @@ def get_main_class(jar_path: str):
         if line.startswith("Main-Class:"):
             return line.split(":", 1)[1].strip()
     return None
+
+
+def resolve_maven_coord(coord: str) -> str:
+    extension = "jar"
+    if "@" in coord:
+        coord_body, extension = coord.rsplit("@", 1)
+        if "@" in coord_body:
+            raise ValueError(f"Invalid maven coord: {coord}")
+        parts = coord_body.split(":")
+    else:
+        parts = coord.split(":")
+
+    if len(parts) < 3:
+        raise ValueError(f"Invalid maven coord: {coord}")
+
+    group = parts[0]
+    artifact = parts[1]
+    version = parts[2]
+    classifier = parts[3] if len(parts) > 3 else None
+
+    if classifier and "@" in classifier:
+        classifier, extension = classifier.split("@", 1)
+    group_path = group.replace(".", "/")
+    filename = f"{artifact}-{version}"
+
+    if classifier:
+        filename += f"-{classifier}"
+    filename += f".{extension}"
+    return f"{group_path}/{artifact}/{version}/{filename}"
