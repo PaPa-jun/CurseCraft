@@ -21,7 +21,7 @@ cli = CurseforgeClient(
 # loader.install("1.20.2", "0.18.4", ".minecraft/")
 
 loader = NeoForgeInstaller()
-res = loader.install("1.21.1", "21.1.129", ".minecraft")
+res = loader.install("1.20.2", "20.2.93", ".minecraft")
 print(res)
 # /mnt/c/Users/Pengy/AppData/Roaming/.minecraft/
 
