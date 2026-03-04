@@ -17,12 +17,21 @@ cli = CurseforgeClient(
 # for loader in res:
 #     print(loader.name, loader.game_version)
 
-loader = FabricInstaller()
-loader.install("1.20.2", "0.18.4", ".minecraft/")
-# /mnt/c/Users/Pengy/AppData/Roaming/.minecraft/
-# content = loader._generate_version_file("1.21.11", "21.11.38-beta", "neoforge")
-# with open("version.json" ,"w") as file:
-#     file.write(json.dumps(content, indent=2))
+# loader = FabricInstaller()
+# loader.install("1.20.2", "0.18.4", ".minecraft/")
 
-# mod = cli.get_mod(925200)
-# cli.download_modpacks(925200, mode="complete")
+loader = NeoForgeInstaller()
+res = loader.install("1.21.1", "21.1.129", ".minecraft")
+print(res)
+# /mnt/c/Users/Pengy/AppData/Roaming/.minecraft/
+
+# loader = NeoForgeInstaller()
+# loader._get_installer(
+#     "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.8.52/neoforge-21.8.52-installer.jar"
+# )
+# loader._install_initialize("client", "1.21.8", "neoforge", "21.8.52", ".minecraft")
+# processors = loader._parse_install_profile(
+#     json.loads(loader.installer["install_profile.json"])
+# )
+# for processor in processors:
+#     print(json.dumps(processor, indent=2))

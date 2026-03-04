@@ -1,7 +1,8 @@
-import os, json, zipfile, io, requests, subprocess
+import os, json, zipfile, io, requests, subprocess, re, tempfile
 from .models import BaseClientModel
+from .utils import get_main_class
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, List, Union
+from typing import Dict, Any, Tuple, Optional, List
 
 
 class ModLoaderInstaller(BaseClientModel):
@@ -16,31 +17,212 @@ class ModLoaderInstaller(BaseClientModel):
         super(ModLoaderInstaller, self).__init__(
             self._headers, api_base_url, max_workers
         )
+
+        self.installer = {}
+        self._static_data = {}
+        self._pattern = re.compile(r"(\{[A-Z_]+\})|(\[[^\]]+\])")
+
         self._minecraft_manifest = requests.request(
             "GET", "https://launchermeta.mojang.com/mc/game/version_manifest.json"
         ).json()
 
-    def _set_paths(
-        self, version_name: str, minecraft_dir_path: Optional[str] = None
+    def _install_initialize(
+        self,
+        install_side: str,
+        minecraft_version: str,
+        loader_name: str,
+        loader_version: str,
+        install_path: Optional[str] = None,
     ) -> None:
-        if minecraft_dir_path is None:
-            self.minecraft_dir_path = self._get_minecraft_dir_path()
-        self.libraries_path = os.path.join(minecraft_dir_path, "libraries")
-        self.versions_path = os.path.join(minecraft_dir_path, "versions")
-        self.profile_path = os.path.join(self.versions_path, version_name)
-        self.profile_json_file = os.path.join(self.profile_path, f"{version_name}.json")
+        self._static_data["SIDE"] = install_side
+        self._static_data["ROOT"] = (
+            install_path if install_path else self._get_minecraft_dir_path()
+        )
+        self._static_data["MINECRAFT_VERSION"] = minecraft_version
+        self._static_data["LOADER_NAME"] = loader_name
+        self._static_data["LOADER_VERSION"] = loader_version
+        self._static_data["MINECRAFT_JAR"] = str(
+            Path(
+                self._static_data["ROOT"],
+                "versions",
+                minecraft_version,
+                f"{minecraft_version}.jar",
+            )
+        )
+
+        if os.path.exists(self._static_data["MINECRAFT_JAR"]) is False:
+            target_version = None
+            for version_info in self._minecraft_manifest["versions"]:
+                if version_info["id"] == minecraft_version:
+                    target_version = version_info
+                    break
+            version_data = requests.request("GET", target_version["url"]).json()
+            self.single_download(
+                version_data["downloads"]["client"]["url"],
+                f"{minecraft_version}.jar",
+                Path(self._static_data["ROOT"], "versions", minecraft_version),
+                8192,
+                version_data["downloads"]["client"]["sha1"],
+                "sha1",
+            )
+
+    def _run_processors(
+        self, processors: Dict[str, Any], java_executable: str = "java"
+    ) -> List[bool]:
+        def _single_process(
+            processor: Dict[str, Any],
+            java_executable: str = "java",
+        ) -> bool:
+            main_class = processor.get("main_class")
+            class_paths = processor.get("class_paths")
+
+            jar_path = processor[
+                "jar"
+            ]
+            args = processor["args"]
+
+            temp_files = []
+
+            for i, arg in enumerate(args):
+                if arg.startswith("/data/"):
+                    file_key = arg[1:]
+                    file_bytes = self.installer[file_key]
+
+                    temp_file = tempfile.NamedTemporaryFile(
+                        delete=False, suffix=os.path.basename(file_key)
+                    )
+                    temp_file.write(file_bytes)
+                    temp_file.close()
+
+                    temp_files.append(temp_file.name)
+                    args[i] = temp_file.name
+
+            classpath_str = os.pathsep.join(class_paths)
+            command = [java_executable, "-cp", classpath_str, main_class] + args
+
+            try:
+                result = subprocess.run(
+                    command,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                print(result.stdout)
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"Fail to patch, Return Code: {e.returncode}")
+                print(f"Stdout: {e.stdout}")
+                print(f"Stderr: {e.stderr}")
+                return False
+            except Exception as e:
+                print(f"Fail to patch: {e}")
+                return False
+            finally:
+                for temp_file_path in temp_files:
+                    try:
+                        os.remove(temp_file_path)
+                    except OSError:
+                        pass
+
+        results = []
+        for processor in processors:
+            results.append(_single_process(processor, java_executable))
+        return results
 
     def _write_version_file(self, data: Dict[str, Any]) -> bool:
+        file_path = Path(
+            self._static_data["ROOT"],
+            "versions",
+            f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}",
+        )
+        file_name = str(
+            Path(
+                file_path,
+                f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}.json",
+            )
+        )
+        data["id"] = (
+            f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}.json"
+        )
         try:
-            os.makedirs(self.profile_path, exist_ok=True)
-            with open(self.profile_json_file, "w", encoding="utf-8") as file:
+            os.makedirs(file_path, exist_ok=True)
+            with open(file_name, "w", encoding="utf-8") as file:
                 json.dump(data, file, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"写入配置文件失败: {e}")
             return False
         return True
 
-    def _get_minecraft_dir_path() -> str:
+    def _replace_arg_variable(self, arg: str) -> str:
+        def replace_match(match):
+            var_match = match.group(1)
+            maven_match = match.group(2)
+
+            if var_match:
+                key = var_match[1:-1]
+                if key in self._static_data:
+                    return self._static_data[key]
+                else:
+                    return var_match
+
+            elif maven_match:
+                coord = maven_match[1:-1]
+                try:
+                    resolved_path = self._resolve_maven_coord(coord)
+                    resolved_path = str(
+                        Path(self._static_data["ROOT"], "libraries", resolved_path)
+                    )
+                    return resolved_path
+                except Exception as e:
+                    print(f"Error resolving maven coord {coord}: {e}")
+                    return maven_match
+
+            return match.group(0)
+
+        return self._pattern.sub(replace_match, arg)
+
+    def _parse_install_profile(self, install_profile: Dict[str, Any]):
+        for key, values in install_profile["data"].items():
+            self._static_data[key] = self._replace_arg_variable(values["client"])
+
+        processors = []
+        for processor in install_profile["processors"]:
+            if self._static_data["SIDE"] not in processor.get("sides", ["client"]):
+                continue
+            jar_path = str(
+                Path(
+                    self._static_data["ROOT"],
+                    "libraries",
+                    self._resolve_maven_coord(processor["jar"]),
+                )
+            )
+            main_class = get_main_class(jar_path)
+            class_paths = []
+            for class_coord in processor.get("classpath"):
+                class_path = str(
+                    Path(
+                        self._static_data["ROOT"],
+                        "libraries",
+                        self._resolve_maven_coord(class_coord),
+                    )
+                )
+                class_paths.append(class_path)
+            args = []
+            for arg in processor["args"]:
+                arg = self._replace_arg_variable(arg)
+                args.append(arg)
+            processors.append(
+                {
+                    "jar": jar_path,
+                    "main_class": main_class,
+                    "class_paths": class_paths,
+                    "args": args,
+                }
+            )
+        return processors
+
+    def _get_minecraft_dir_path(self) -> str:
         home_path = Path.home()
         if os.name == "nt":
             appdata = os.getenv("APPDATA")
@@ -65,36 +247,52 @@ class ModLoaderInstaller(BaseClientModel):
         return minecraft_dir_path
 
     def _resolve_maven_coord(self, coord: str) -> str:
-        parts = coord.replace("[", "").replace("]", "").split(":")
+        extension = "jar"
+        
+        if "@" in coord:
+            coord_body, extension = coord.rsplit("@", 1)
+            parts = coord_body.split(":")
+        else:
+            parts = coord.split(":")
+
         if len(parts) < 3:
             raise ValueError(f"Invalid maven coord: {coord}")
+
         group = parts[0]
         artifact = parts[1]
         version = parts[2]
         classifier = parts[3] if len(parts) > 3 else None
-        extension = "jar"
-
+        
         if classifier and "@" in classifier:
-            classifier, extension = classifier.split("@")
-
+            classifier, ext_override = classifier.split("@", 1)
+            if ext_override:
+                extension = ext_override
         group_path = group.replace(".", "/")
         filename = f"{artifact}-{version}"
+        
         if classifier:
             filename += f"-{classifier}"
         filename += f".{extension}"
-
         return f"{group_path}/{artifact}/{version}/{filename}"
 
-    def get_installer(self, url: str) -> Union[bytes, str]:
-        pass
+    def _get_installer(self, url: str) -> None:
+        response = self._request("GET", url)
+        try:
+            with zipfile.ZipFile(io.BytesIO(response.content), "r") as zip_ref:
+                for file_name in zip_ref.namelist():
+                    if file_name.endswith("/"):
+                        continue
+                    self.installer[file_name] = zip_ref.read(file_name)
+        except Exception as e:
+            raise RuntimeError(f"解析 installer 失败: {e}")
 
     def install(
         self,
         minecraft_version: str,
         loader_version: str,
         minecraft_dir_path: Optional[str] = None,
-        version_name: Optional[str] = None,
         download_block_size: int = 8192,
+        install_side: str = "client",
     ):
         raise NotImplementedError("Not implemented yet.")
 
@@ -124,12 +322,16 @@ class FabricInstaller(ModLoaderInstaller):
         minecraft_version: str,
         loader_version: str,
         minecraft_dir_path: Optional[str] = None,
-        version_name: Optional[str] = None,
         download_block_size: int = 8192,
+        install_side: str = "client",
     ):
-        if version_name is None:
-            version_name = f"fabric-{minecraft_version}-{loader_version}"
-        self._set_paths(version_name, minecraft_dir_path)
+        self._install_initialize(
+            install_side,
+            minecraft_version,
+            "fabric",
+            loader_version,
+            minecraft_dir_path,
+        )
 
         version_profile = self.get(
             f"/v2/versions/loader/{minecraft_version}/{loader_version}/profile/json"
@@ -151,12 +353,11 @@ class FabricInstaller(ModLoaderInstaller):
 
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
-            path = os.path.join(self.libraries_path, prefix)
+            path = Path(self._static_data["ROOT"], "libraries", prefix)
             deps_res.extend(self.batch_download(tasks, path, download_block_size))
         if all(deps_res) is not True:
             return False
 
-        version_profile["id"] = version_name
         return self._write_version_file(version_profile)
 
 
@@ -166,176 +367,46 @@ class NeoForgeInstaller(ModLoaderInstaller):
     ) -> None:
         super(NeoForgeInstaller, self).__init__(maven_base_url, max_workers)
 
-    def _generate_version_file(
-        self,
-        minecraft_version: str,
-        loader_version: str,
-        version_name: str,
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        response = self.get(
-            f"/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
-        )
-        try:
-            with zipfile.ZipFile(io.BytesIO(response.content), "r") as zip_ref:
-                version_filename = "version.json"
-                profile_filename = "install_profile.json"
-
-                with zip_ref.open(profile_filename) as profile_file:
-                    profile_data = json.load(profile_file)
-                with zip_ref.open(version_filename) as version_file:
-                    version_data = json.load(version_file)
-                bin_path_filename = "/".join(
-                    profile_data["data"]["BINPATCH"]["client"].split("/")[1:]
-                )
-                with zip_ref.open(bin_path_filename) as bin_path_file:
-                    bin_path = bin_path_file.read()
-        except Exception as e:
-            raise RuntimeError(f"解析 NeoForge installer 失败: {e}")
-        version_data["id"] = version_name
-        version_data["inheritsFrom"] = minecraft_version
-        return (version_data, profile_data["libraries"], profile_data["data"], bin_path)
-
-    def _process(
-        self,
-        installer_tool_path: str,
-        minecraft_jar_path: str,
-        mojang_maping_path: str,
-        patched_path: str,
-        libraries_path: str,
-        neoform_mapping_path: str,
-        bin_path: bytes,
-    ) -> bool:
-        if os.path.exists(patched_path) is not False:
-            os.remove(patched_path)
-        with open(".temp.lzma", "wb") as file:
-            file.write(bin_path)
-        command = [
-            "java",
-            "-jar",
-            installer_tool_path,
-            "--task",
-            "PROCESS_MINECRAFT_JAR",
-            "--input",
-            minecraft_jar_path,
-            "--input-mappings",
-            mojang_maping_path,
-            "--output",
-            patched_path,
-            "--extract-libraries-to",
-            libraries_path,
-            "--neoform-data",
-            neoform_mapping_path,
-            "--apply-patches",
-            ".temp.lzma",
-        ]
-        try:
-            subprocess.run(
-                command,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"Fail to patch {minecraft_jar_path}: {e}")
-            print(f"Stdout: {e.stdout}")
-            print(f"Stderr: {e.stderr}")
-            return False
-        except Exception as e:
-            print(f"Fail to patch {minecraft_jar_path}: {e}")
-            return False
-        finally:
-            if os.path.exists(".temp.lzma") is not False:
-                os.remove(".temp.lzma")
-        return True
-
     def install(
         self,
         minecraft_version,
         loader_version,
         minecraft_dir_path=None,
-        version_name=None,
         download_block_size=8192,
-    ) -> bool:
-        if version_name is None:
-            version_name = f"neoforge-{loader_version}"
-        self._set_paths(version_name, minecraft_dir_path)
-
-        version_profile, libraries, satic_data, bin_patch = self._generate_version_file(
-            minecraft_version, loader_version, version_name
+        install_side="client",
+    ):
+        self._install_initialize(
+            install_side,
+            minecraft_version,
+            "neoforge",
+            loader_version,
+            minecraft_dir_path,
+        )
+        self._get_installer(
+            f"{self._base_url}/releases/net/neoforged/neoforge/{loader_version}/neoforge-{loader_version}-installer.jar"
         )
 
+        install_profile = json.loads(self.installer["install_profile.json"])
+        version_profile = json.loads(self.installer["version.json"])
+
         grouped_tasks: Dict[str, List[str]] = {}
-        for lib in libraries:
+        for lib in install_profile["libraries"]:
             sha1_value = lib["downloads"]["artifact"]["sha1"]
             folder_prefix = str(Path(lib["downloads"]["artifact"]["path"]).parent)
             file_name = str(Path(lib["downloads"]["artifact"]["path"]).name)
             task = (file_name, lib["downloads"]["artifact"]["url"], sha1_value, "sha1")
             grouped_tasks.setdefault(folder_prefix, []).append(task)
 
-        maven_path = self._resolve_maven_coord(satic_data["MOJMAPS"]["client"])
-        folder_prefix = str(Path(maven_path).parent)
-        file_name = str(Path(maven_path).name)
-        target_version = None
-        for version_info in self._minecraft_manifest["versions"]:
-            if version_info["id"] == minecraft_version:
-                target_version = version_info
-                break
-        version_data = requests.request("GET", target_version["url"]).json()
-        task = (
-            file_name,
-            version_data["downloads"]["client_mappings"]["url"],
-            version_data["downloads"]["client_mappings"]["sha1"],
-            "sha1",
-        )
-        grouped_tasks.setdefault(folder_prefix, []).append(task)
-
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
-            path = os.path.join(self.libraries_path, prefix)
+            path = Path(self._static_data["ROOT"], "libraries", prefix)
             deps_res.extend(self.batch_download(tasks, path, download_block_size))
         if not all(deps_res):
             return False
-
-        if not os.path.exists(
-            Path(self.versions_path, minecraft_version, f"{minecraft_version}.jar")
-        ):
-            self.single_download(
-                version_data["downloads"]["client"]["url"],
-                f"{minecraft_version}.jar",
-                Path(self.versions_path, minecraft_version),
-                download_block_size,
-                version_data["downloads"]["client"]["sha1"],
-                "sha1",
-            )
-
-        install_tool_coord = None
-        for lib in libraries:
-            if "net.neoforged.installertools:installertools" in lib.get("name"):
-                install_tool_coord = lib.get("name")
-                break
-
-        pro_res = self._process(
-            Path(
-                self.libraries_path,
-                self._resolve_maven_coord(install_tool_coord),
-            ),
-            Path(self.versions_path, minecraft_version, f"{minecraft_version}.jar"),
-            Path(self.libraries_path, maven_path),
-            Path(
-                self.libraries_path,
-                self._resolve_maven_coord(satic_data["PATCHED"]["client"]),
-            ),
-            self.libraries_path,
-            Path(
-                self.libraries_path,
-                self._resolve_maven_coord(
-                    f"net.neoforged:neoform:{satic_data["MCP_VERSION"]["client"]}:mappings@tsrg.lzma"
-                ).replace("'", ""),
-            ),
-            bin_patch,
-        )
-        if pro_res is not True:
+        
+        processors = self._parse_install_profile(install_profile)
+        pro_res = self._run_processors(processors)
+        if not all(pro_res):
             return False
 
         return self._write_version_file(version_profile)
