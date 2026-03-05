@@ -4,9 +4,8 @@ from pathlib import Path
 from configparser import ConfigParser
 from typing import Optional, Dict
 
-from .loaders import ForgeInstaller, FabricInstaller, NeoForgeInstaller
+from .loaders import BaseInstaller, ForgeInstaller, FabricInstaller, NeoForgeInstaller
 from .client import CurseforgeClient
-from .models import BaseInstaller
 from .utils import get_minecraft_dir_path, unzip_file, get_image_base64, single_download
 
 
@@ -54,6 +53,7 @@ class CurseCraft:
             configs.getint("CURSEFORGE", "LOADER_TYPE.NEOFORGE"): "neoforge",
         }
 
+        self.max_workers = configs.getint("UNIVERSAL", "MAX_WORKERS")
         self.block_size = configs.getint("UNIVERSAL", "BLOCK_SIZE")
         self.mc_root_dir = mc_root_dir if mc_root_dir else get_minecraft_dir_path()
 
@@ -91,7 +91,10 @@ class CurseCraft:
 
         modpack_file_ids = [f["fileID"] for f in manifest["files"]]
         success = self.client.download_files(
-            modpack_file_ids, Path(game_dir, latest_file.display_name), self.block_size
+            modpack_file_ids,
+            Path(game_dir, latest_file.display_name),
+            self.block_size,
+            self.max_workers,
         )
         if not all(success):
             return False
@@ -119,7 +122,7 @@ class CurseCraft:
             ).exists()
         ):
             success = self.loader_installer[loader.type].install(
-                mc_version, loader.forge_version, self.mc_root_dir, self.block_size
+                mc_version, loader.forge_version, self.mc_root_dir
             )
             if success is False:
                 return False

@@ -1,6 +1,6 @@
 import zipfile, os, requests, base64, hashlib
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from tqdm import tqdm
 from tenacity import (
     retry,
@@ -22,6 +22,67 @@ universal_headers = {
 
 class HashVerificationError(Exception):
     pass
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(
+        (
+            ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+            requests.exceptions.RequestException,
+        )
+    ),
+    reraise=True,
+)
+def request(
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    json: Optional[Dict[str, Any]] = None,
+) -> requests.Response:
+    response = requests.request(
+        method=method.upper(),
+        url=url,
+        headers=headers,
+        params=params,
+        json=json,
+    )
+    response.raise_for_status()
+    return response
+
+
+def get(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    json: Optional[Dict[str, Any]] = None,
+) -> requests.Response:
+    return request(
+        method="GET",
+        url=url,
+        headers=headers,
+        params=params,
+        json=json,
+    )
+
+
+def post(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    json: Optional[Dict[str, Any]] = None,
+) -> requests.Response:
+    return request(
+        method="POST",
+        url=url,
+        headers=headers,
+        params=params,
+        json=json,
+    )
 
 
 def unzip_file(
@@ -144,7 +205,13 @@ def get_image_base64(image_url: str) -> str:
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type(
-        (ConnectionError, requests.exceptions.Timeout, requests.exceptions.HTTPError)
+        (
+            ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+            requests.exceptions.RequestException,
+            HashVerificationError,
+        )
     ),
     reraise=True,
     before_sleep=lambda retry_state: print(
