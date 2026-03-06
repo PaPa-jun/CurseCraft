@@ -1,5 +1,4 @@
 import json, zipfile, io, re, tempfile, os, subprocess
-from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 from .utils import (
@@ -54,8 +53,8 @@ class BaseInstaller:
                 coord = maven_match[1:-1]
                 try:
                     resolved_path = resolve_maven_coord(coord)
-                    resolved_path = str(
-                        Path(self._static_data["ROOT"], "libraries", resolved_path)
+                    resolved_path = os.path.join(
+                        self._static_data["ROOT"], "libraries", resolved_path
                     )
                     return resolved_path
                 except Exception as e:
@@ -74,24 +73,20 @@ class BaseInstaller:
             if self._static_data["SIDE"] not in processor.get("sides", [side]):
                 continue
 
-            jar_path = str(
-                Path(
-                    self._static_data["ROOT"],
-                    "libraries",
-                    resolve_maven_coord(processor["jar"]),
-                )
+            jar_path = os.path.join(
+                self._static_data["ROOT"],
+                "libraries",
+                resolve_maven_coord(processor["jar"]),
             )
 
             main_class = get_main_class(jar_path)
 
             class_paths = []
             for class_coord in processor.get("classpath"):
-                class_path = str(
-                    Path(
-                        self._static_data["ROOT"],
-                        "libraries",
-                        resolve_maven_coord(class_coord),
-                    )
+                class_path = os.path.join(
+                    self._static_data["ROOT"],
+                    "libraries",
+                    resolve_maven_coord(class_coord),
                 )
                 class_paths.append(class_path)
             if jar_path not in class_paths:
@@ -196,26 +191,22 @@ class BaseInstaller:
         self._static_data["MINECRAFT_VERSION"] = minecraft_version
         self._static_data["LOADER_NAME"] = loader_name
         self._static_data["LOADER_VERSION"] = loader_version
-        self._static_data["MINECRAFT_JAR"] = str(
-            Path(
-                self._static_data["ROOT"],
-                "versions",
-                minecraft_version,
-                f"{minecraft_version}.jar",
-            )
+        self._static_data["MINECRAFT_JAR"] = os.path.join(
+            self._static_data["ROOT"],
+            "versions",
+            minecraft_version,
+            f"{minecraft_version}.jar",
         )
 
     def _write_version_file(self, data: Dict[str, Any]) -> bool:
-        file_path = Path(
+        file_path = os.path.join(
             self._static_data["ROOT"],
             "versions",
             f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}",
         )
-        file_name = str(
-            Path(
-                file_path,
-                f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}.json",
-            )
+        file_name = os.path.join(
+            file_path,
+            f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}.json",
         )
         data["id"] = (
             f"{self._static_data["LOADER_NAME"]}-{self._static_data["LOADER_VERSION"]}"
@@ -243,7 +234,7 @@ class BaseInstaller:
             return single_download(
                 version_data["downloads"]["client"]["url"],
                 f"{self._static_data["MINECRAFT_VERSION"]}.jar",
-                Path(
+                os.path.join(
                     self._static_data["ROOT"],
                     "versions",
                     self._static_data["MINECRAFT_VERSION"],
@@ -294,8 +285,8 @@ class ForgeInstaller(BaseInstaller):
         grouped_tasks: Dict[str, List[str]] = {}
         for lib in install_profile["libraries"]:
             sha1_value = lib["downloads"]["artifact"]["sha1"]
-            folder_prefix = str(Path(lib["downloads"]["artifact"]["path"]).parent)
-            file_name = str(Path(lib["downloads"]["artifact"]["path"]).name)
+            folder_prefix = os.path.dirname(lib["downloads"]["artifact"]["path"])
+            file_name = os.path.basename(lib["downloads"]["artifact"]["path"])
             download_url = (
                 lib["downloads"]["artifact"]["url"]
                 if lib["downloads"]["artifact"]["url"]
@@ -307,7 +298,7 @@ class ForgeInstaller(BaseInstaller):
 
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
-            path = Path(self._static_data["ROOT"], "libraries", prefix)
+            path = os.path.join(self._static_data["ROOT"], "libraries", prefix)
             deps_res.extend(
                 batch_download(tasks, path, self._block_size, self._max_workers)
             )
@@ -367,8 +358,8 @@ class FabricInstaller(BaseInstaller):
             hash_pack = self._get_lib_hash(lib)
             maven_path = resolve_maven_coord(lib.get("name"))
             url = lib.get("url") + maven_path
-            folder_prefix = str(Path(maven_path).parent)
-            file_name = Path(maven_path).name
+            folder_prefix = os.path.dirname(maven_path)
+            file_name = os.path.basename(maven_path)
             if hash_pack is not None:
                 task = (file_name, url, hash_pack[0], hash_pack[1])
             else:
@@ -377,7 +368,7 @@ class FabricInstaller(BaseInstaller):
 
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
-            path = Path(self._static_data["ROOT"], "libraries", prefix)
+            path = os.path.join(self._static_data["ROOT"], "libraries", prefix)
             deps_res.extend(
                 batch_download(tasks, path, self._block_size, self._max_workers)
             )
@@ -418,14 +409,14 @@ class NeoForgeInstaller(BaseInstaller):
         grouped_tasks: Dict[str, List[str]] = {}
         for lib in install_profile["libraries"]:
             sha1_value = lib["downloads"]["artifact"]["sha1"]
-            folder_prefix = str(Path(lib["downloads"]["artifact"]["path"]).parent)
-            file_name = str(Path(lib["downloads"]["artifact"]["path"]).name)
+            folder_prefix = os.path.dirname(lib["downloads"]["artifact"]["path"])
+            file_name = os.path.basename(lib["downloads"]["artifact"]["path"])
             task = (file_name, lib["downloads"]["artifact"]["url"], sha1_value, "sha1")
             grouped_tasks.setdefault(folder_prefix, []).append(task)
 
         deps_res = []
         for prefix, tasks in grouped_tasks.items():
-            path = Path(self._static_data["ROOT"], "libraries", prefix)
+            path = os.path.join(self._static_data["ROOT"], "libraries", prefix)
             deps_res.extend(
                 batch_download(tasks, path, self._block_size, self._max_workers)
             )

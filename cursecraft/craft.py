@@ -1,6 +1,5 @@
 import json, os, shutil
 from datetime import datetime, timezone
-from pathlib import Path
 from configparser import ConfigParser
 from typing import Optional, Dict
 
@@ -61,7 +60,7 @@ class CurseCraft:
         self, mod_id: int, game_dir: Optional[str] = None, side: str = "client"
     ):
         if game_dir is None:
-            game_dir = Path(Path.home(), "Downloads")
+            game_dir = os.path.join(os.path.expanduser("~"), "Downloads")
 
         modpack = self.client.get_mod(mod_id)
         latest_file = sorted(
@@ -71,7 +70,7 @@ class CurseCraft:
         success = single_download(
             url=latest_file.download_url,
             file_name=latest_file.file_name,
-            dest_path=Path(game_dir, latest_file.display_name),
+            dest_path=os.path.join(game_dir, latest_file.display_name),
             block_size=self.block_size,
             expected_hash=latest_file.hashes[0].value,
             hash_algo=self.client._hash_algo[latest_file.hashes[0].algo],
@@ -79,22 +78,24 @@ class CurseCraft:
         if success is False:
             return False
 
-        zip_file_name = str(
-            Path(game_dir, latest_file.display_name, latest_file.file_name)
+        zip_file_name = os.path.join(
+            game_dir, latest_file.display_name, latest_file.file_name
         )
-        success = unzip_file(zip_file_name, Path(game_dir, latest_file.display_name))
+        success = unzip_file(
+            zip_file_name, os.path.join(game_dir, latest_file.display_name)
+        )
         if success is False:
             return False
 
         with open(
-            str(Path(game_dir, latest_file.display_name, "manifest.json")), "r"
+            os.path.join(game_dir, latest_file.display_name, "manifest.json"), "r"
         ) as file:
             manifest = json.load(file)
 
         modpack_file_ids = [f["fileID"] for f in manifest["files"]]
         success = self.client.download_files(
             modpack_file_ids,
-            Path(game_dir, latest_file.display_name),
+            os.path.join(game_dir, latest_file.display_name),
             self.block_size,
             self.max_workers,
         )
@@ -110,18 +111,20 @@ class CurseCraft:
         else:
             loader = self.client.get_specific_minecraft_loader(mod_loader_name)
 
-        loader_version_path = Path(
+        loader_version_path = os.path.join(
             self.mc_root_dir,
             "versions",
             f"{self.loader_name[loader.type]}-{loader.forge_version}",
         )
 
         if not (
-            loader_version_path.exists()
-            and Path(
-                loader_version_path,
-                f"{self.loader_name[loader.type]}-{loader.forge_version}.json",
-            ).exists()
+            os.path.exists(loader_version_path)
+            and os.path.exists(
+                os.path.join(
+                    loader_version_path,
+                    f"{self.loader_name[loader.type]}-{loader.forge_version}.json",
+                )
+            )
         ):
             success = self.loader_installer[loader.type].install(
                 mc_version, loader.forge_version, self.mc_root_dir, side
@@ -129,10 +132,12 @@ class CurseCraft:
             if success is False:
                 return False
 
-        with open(Path(self.mc_root_dir, "launcher_profiles.json"), "r") as file:
+        with open(
+            os.path.join(self.mc_root_dir, "launcher_profiles.json"), "r"
+        ) as file:
             launcher_profile = json.load(file)
             launcher_profile["profiles"][modpack.slug] = {
-                "gameDir": str(Path(game_dir, latest_file.display_name)),
+                "gameDir": os.path.join(game_dir, latest_file.display_name),
                 "icon": get_image_base64(modpack.logo.url),
                 "javaArgs": f"-Xmx{manifest['minecraft'].get('recommendedRam', 2048)}M -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
                 "lastUsed": datetime.now(timezone.utc)
@@ -144,21 +149,27 @@ class CurseCraft:
                 "type": "custom",
             }
 
-        with open(Path(self.mc_root_dir, "launcher_profiles.json"), "w") as file:
+        with open(
+            os.path.join(self.mc_root_dir, "launcher_profiles.json"), "w"
+        ) as file:
             json.dump(launcher_profile, file, indent=2)
 
-        if Path(game_dir, latest_file.display_name, "overrides").exists():
-            for item in Path(game_dir, latest_file.display_name, "overrides").iterdir():
-                src_item = item
-                dest_item = Path(game_dir, latest_file.display_name) / item.name
-                if src_item.is_dir():
-                    if dest_item.exists():
+        overrides_dir = os.path.join(game_dir, latest_file.display_name, "overrides")
+        dest_base = os.path.join(game_dir, latest_file.display_name)
+        if os.path.exists(overrides_dir):
+            for filename in os.listdir(overrides_dir):
+                src_item = os.path.join(overrides_dir, filename)
+                dest_item = os.path.join(dest_base, filename)
+                if os.path.isdir(src_item):
+                    if os.path.exists(dest_item):
                         shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
                     else:
                         shutil.copytree(src_item, dest_item)
                 else:
                     shutil.copy2(src_item, dest_item)
-            shutil.rmtree(Path(game_dir, latest_file.display_name, "overrides"))
+            shutil.rmtree(os.path.join(game_dir, latest_file.display_name, "overrides"))
 
-        os.remove(Path(game_dir, latest_file.display_name, latest_file.file_name))
+        os.remove(
+            os.path.join(game_dir, latest_file.display_name, latest_file.file_name)
+        )
         return True

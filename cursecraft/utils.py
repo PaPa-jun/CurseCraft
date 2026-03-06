@@ -1,5 +1,4 @@
 import zipfile, os, requests, base64, hashlib
-from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 from tqdm import tqdm
 from tenacity import (
@@ -139,27 +138,29 @@ def resolve_maven_coord(coord: str) -> str:
 
 
 def get_minecraft_dir_path() -> str:
-    home_path = Path.home()
+    home_path = os.path.expanduser("~")
     if os.name == "nt":
         appdata = os.getenv("APPDATA")
         minecraft_dir_path = (
-            Path(appdata, ".minecraft") if appdata else Path(home_path, ".minecraft")
+            os.path.join(appdata, ".minecraft")
+            if appdata
+            else os.path.join(home_path, ".minecraft")
         )
     elif os.name == "posix":
         if os.path.exists(
-            Path(home_path, "Library", "Application Support", "minecraft")
+            os.path.join(home_path, "Library", "Application Support", "minecraft")
         ):
-            minecraft_dir_path = Path(
+            minecraft_dir_path = os.path.join(
                 home_path, "Library", "Application Support", "minecraft"
             )
         else:
-            minecraft_dir_path = Path(home_path, ".minecraft")
+            minecraft_dir_path = os.path.join(home_path, ".minecraft")
     else:
-        minecraft_dir_path = Path(home_path, ".minecraft")
+        minecraft_dir_path = os.path.join(home_path, ".minecraft")
     return minecraft_dir_path
 
 
-def calculate_file_hash(file_path: str | Path, hash_algo: str):
+def calculate_file_hash(file_path: str, hash_algo: str):
     hash_func = hashlib.new(hash_algo)
     with open(file_path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -167,7 +168,7 @@ def calculate_file_hash(file_path: str | Path, hash_algo: str):
     return hash_func.hexdigest()
 
 
-def hash_verify(file_path: str | Path, expected_hash: str, hash_algo: str):
+def hash_verify(file_path: str, expected_hash: str, hash_algo: str):
     expected_hash = expected_hash.lower().strip()
     file_hash = calculate_file_hash(file_path, hash_algo)
     if file_hash == expected_hash:
@@ -220,7 +221,7 @@ def get_image_base64(image_url: str) -> str:
 )
 def _do_download_job(
     url: str,
-    file_path: Path,
+    file_path: str,
     block_size: int,
     headers: dict,
     expected_hash: str | None,
@@ -233,7 +234,10 @@ def _do_download_job(
             total_size = int(response.headers.get("content-length", 0))
             with open(file_path, "wb") as f:
                 with tqdm(
-                    total=total_size, unit="B", unit_scale=True, desc=file_path.name
+                    total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc=os.path.basename(file_path),
                 ) as pbar:
                     for chunk in response.iter_content(chunk_size=block_size):
                         if chunk:
@@ -242,15 +246,15 @@ def _do_download_job(
 
         if expected_hash is not None:
             if not hash_verify(file_path, expected_hash, hash_algo):
-                if file_path.exists():
+                if os.path.exists(file_path):
                     os.remove(file_path)
                 raise HashVerificationError(
-                    f"Hash mismatch for {file_path.name}. Expected: {expected_hash}"
+                    f"Hash mismatch for {os.path.basename(file_path)}. Expected: {expected_hash}"
                 )
 
     except Exception as e:
         print(f"Unknown error occured when downloading: {e}")
-        if file_path.exists():
+        if os.path.exists(file_path):
             os.remove(file_path)
         raise
 
@@ -265,18 +269,20 @@ def single_download(
 ) -> bool:
 
     if dest_path is None:
-        home_path = Path.home()
-        dest_path = Path(home_path, "Downloads")
+        home_path = os.path.expanduser("~")
+        dest_path = os.path.join(home_path, "Downloads")
     os.makedirs(dest_path, exist_ok=True)
-    full_path = Path(dest_path, file_name)
+    full_path = os.path.join(dest_path, file_name)
 
-    if full_path.exists():
+    if os.path.exists(full_path):
         if expected_hash:
             if hash_verify(full_path, expected_hash, hash_algo):
                 return True
             os.remove(full_path)
 
-    temp_path = full_path.with_suffix(full_path.suffix + ".tmp")
+    root, ext = os.path.splitext(full_path)
+    temp_path = root + ext + ".tmp"
+
     try:
         _do_download_job(
             url=url,
@@ -286,11 +292,11 @@ def single_download(
             expected_hash=expected_hash,
             hash_algo=hash_algo,
         )
-        temp_path.replace(full_path)
+        os.replace(temp_path, full_path)
         return True
     except Exception as e:
         print(f"Download failed permanently after retries: {file_name}: {e}")
-        if temp_path.exists():
+        if os.path.exists(temp_path):
             os.remove(temp_path)
         return False
 
